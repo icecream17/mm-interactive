@@ -1,0 +1,313 @@
+// global //
+
+import { INFO, assert } from "./html.js"
+...
+
+const declarationOrder = []
+
+
+
+// scopes //
+
+
+/** @type {Scope} */
+let currscope;
+class Scope {
+   constructor (parent) {
+      this.parent = parent
+      currscope = this
+      ...
+   }
+
+   ...
+}
+
+const glscope = new Scope()
+...
+
+// Metamath language - corresponds to "${"
+export function startScope () {
+   const s = new Scope(currscope)
+   currscope = s
+   return s
+}
+
+// Metamath language - corresponds to "$}"
+export function endScope () {
+   assert(currscope !== glscope, "Cannot end global scope")
+   return currscope = currscope.parent
+}
+
+
+
+// tokens //
+
+
+class Scope {
+   constructor (parent) {
+      ...
+
+      this.tokRegistry = new Map() // Map<name, tok>
+      ...
+   }
+
+   hasTok(tok) {
+      return this.tokRegistry.has(tok) || this.parent?.hasTok(tok)
+   }
+
+   // unused here //
+   getTok(tok) {
+      const r = this.tokRegistry.get(tok) ?? this.parent?.getTok(tok)
+      assert(r !== undefined, `getTok: ${tok} does not exist!`)
+   }
+
+   setTok(tok) {
+      this.tokRegistry.set(tok.name, tok)
+   }
+
+   ...
+}
+
+/** @type {Set<str>} */
+const wasvar = new Set() // Only to prevent constants and previously defined variables to have conflicting names
+...
+const validSymbol = tok => /^[a-zA-Z0-9!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~]+$/.test(tok)
+...
+
+/**
+ * @param {"c" | "v"} type
+ * @param {string} name
+ */
+function Tok (type, name) {
+   assert(type === "c" || type === "v", `Type ${type} must be "c" or "v"`)
+   if (type === "c") {
+      assert(glscope === currscope, `Constants (here ${name}) must be declared in global scope`)
+      assert(!wasvar.has(name), `${name} cannot be a constant because it was previously defined as a variable!`)
+   } else {
+      wasvar.add(name)
+   }
+   assert(!currscope.hasTok(name), `${name} already exists!`)
+   assert(validSymbol(name), `${name} is invalid!`)
+   this.type = type
+   this.name = name
+   currscope.setTok(name, type)
+   declarationOrder.push(this)
+}
+
+
+
+// const toks, var toks, distinct vars //
+
+
+class Scope {
+   constructor (parent) {
+      ...
+      this.dvars = new Set()
+   }
+   ...
+
+   isConst(c) {
+      return this.getTok(c).type === "c"
+   }
+
+   isVar(v) {
+      return this.getTok(v).type === "v"
+   }
+
+   dVar(a, b) {
+      for (const dvar of this.dvars) {
+         if (dvar.has(a) && dvar.has(b)) {
+            return true
+         }
+      }
+      return this.parent?.dVar(a, b) ?? false
+   }
+}
+
+// Metamath language - constant and variable declarations
+// The "name" of a token is its math-symbol.
+//   $c math-symbol ...math-symbol[] $.
+//   $v math-symbol ...math-symbol[] $.
+export const cDecl = (...names) => names.map(name => new Tok("c", name))
+export const vDecl = (...names) => names.map(name => new Tok("v", name))
+
+// Metamath language - Distinct variable condition
+//   $d variable variable ...variable[] $.
+export function Dvar (...vars) {
+   const vs = new Set(vars)
+   assert(vs.size === vars.length, `No duplicates! ${vars}`)
+   assert(vars.every(v => currscope.hasTok(v)))
+   currscope.dvars.add(vs)
+   declarationOrder.push(vs)
+}
+
+
+
+// Labels //
+
+
+/** @type {Map<str, Label>} */
+const labels = new Map() // Hypotheses, assertions, and theorems
+...
+
+const validLabel = tok => /^[a-zA-Z0-9\-_.]+$/.test(tok) // Unrequired "\" escape for clarity
+...
+
+class Expr {
+   constructor (str) {
+      /** @type {Tok[]} */
+      this.toks = str.trim().split(' ').map(tok => currscope.get(tok))
+   }
+
+   get vars () {
+      return this.toks.filter(tok => tok.type === "v")
+   }
+}
+
+function setupLabel (type, name, str, self) {
+   assert(!labels.has(name), `No duplicates! ${type} ${name}`)
+   assert(!currscope.hasTok(name), `No duplicates! [Label-Math tok conflict] ${type} ${name}`)
+   labels.set(name, self)
+   self.type = type
+   self.name = name
+   self.assertion = new Expr(str)
+   self.vars = self.assertion.vars
+   assert(currscope.isConst(self.assertion.toks[0]), `${type} ${name}; Labels must start with a typecode (constant):\n${str}`)
+   if (label !== "fhyp") {
+      const invalidvars = self.vars.filter(v => !fhyps.has(v))
+      assert(invalidvars.length === 0, `${type} ${name}: Before using a variable it must appear in an fhyp\n${invalidvars}`)
+   }
+   declarationOrder.push(self)
+}
+
+
+
+// Hyps //
+
+class Scope {
+   constructor (parent) {
+      ...
+      this.ehyps = new Set()
+      ...
+   }
+   ...
+}
+...
+
+/** @type {Map<Tok & {type: "v"}, Fhyp>} */
+const fhyps = new Map() // Floating hypotheses are global
+...
+
+// Metamath language - "floating" hypothesis
+//   label $f typecode variable $.
+// @constructor
+function Fhyp (name, str) {
+   setupLabel("fhyp", name, str, this)
+   assert(self.assertion.toks.length === 2, `fhyp must have two tokens, got:\n${self.assertion.toks}`)
+   assert(currscope.isVar(this.assertion.toks[1]), `the second token in an fhyp must have a variable:\n${str}`)
+   assert(!fhyps.has(this.assertion.toks[1]), `variable already in an fhyp! duplicates:\n${fhyps.get(this.assertion.toks[1])}\n${name}`)
+   fhyps.set(this.assertion.toks[1], this)
+}
+
+// Metamath language - essential hypothesis
+//   label $e typecode ...math-symbol[] $.
+function Ehyp (name, str) {
+   setupLabel("ehyp", name, str, this)
+   currscope.ehyps.add(this)
+}
+
+
+
+// Axiomatic assertions //
+// This goes alongside Provable assertions but I separate them here
+
+function setupAssertedLabel (type, name, str, self) {
+   setupLabel(type, name, str, self)
+
+   // Mandatory frame props
+   self.mandatoryHyps = new Set()
+   self.mandatoryVars = new Set(self.vars)
+   for (const ehyp of currscope.ehyps) {
+      self.mandatoryHyps.add(ehyp)
+      for (const va of ehyp.vars) {
+         self.mandatoryVars.add(va)
+      }
+   }
+
+   const coveredMandatoryVars = new Set()
+   for (const fhyp of fhyps) {
+      const v = fhyp.vars[0]
+      if (self.mandatoryVars.includes(v)) {
+         self.mandatoryHyps.add(fhyp)
+         coveredMandatoryVars.add(v)
+      }
+   }
+
+   assert(self.mandatoryVars.size === coveredMandatoryVars.size, `Not all variables in ${name} are covered by $f hypotheses: ${[...coveredMandatoryVars]} out of ${[...self.mandatoryVars]}`)
+
+   // Order mandatory hyps
+   const mHyps = new Set()
+   for (const stmt of declarationOrder) {
+      if (self.mandatoryHyps.has(stmt)) {
+         mHyps.add(stmt)
+      }
+   }
+   self.mandatoryHyps = mHyps
+
+   // Optional frame hyps
+   if (type !== "Axiom") {
+      ...
+   }
+}
+
+// Metamath language - Axiomatic assertions
+function Alabe (name, str) {
+   setupAssertedLabel("Axiom", name, str, this)
+}
+
+
+
+// Provable assertions //
+
+function setupAssertedLabel (type, name, str, self) {
+   ...
+
+   // Optional frame hyps
+   if (type !== "Axiom") {
+      self.optionalVars = new Set()
+      self.optionalHyps = new Set()
+
+      // TODO: Optimization - don't recalc fhyp vars
+      for (const fhyp of fhyps) {
+         const v = fhyp.vars[0]
+         if (!self.mandatoryVars.includes(v)) {
+            self.optionalVars.add(v)
+            self.optionalHyps.add(fhyp)
+         }
+      }
+
+      self.optionalDvars = new Set()
+
+      // Distinct variable condition
+      for (const dvarc of dvars) {
+         for (const dvar of dvarc) {
+            if (!self.mandatoryVars.includes(dvar)) {
+               self.optionalVars.add(v)
+               self.optionalDvars.add(dvarc)
+            }
+         }
+      }
+   }
+}
+
+// Metamath language - Provable assertions
+function Plabe (name, str, ...proof) {
+   setupAssertedLabel("Theorem", name, str, this)
+   this.proof = proof
+   verifyProof(this)
+}
+
+
+
+// Verify proof //
+

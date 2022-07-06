@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+
+<!-- Or whatever language you use -->
+<html lang="en-US">
+
+   <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+      <!-- Used for security. Remove if you can control the web server's response headers.
+        You don't have control if you're using github pages.
+        If you're using external scripts, styles, images, or other files... (todo) -->
+      <meta http-equiv="content-security-policy" content="upgrade-insecure-requests; default-src 'self'">
+
+      <!-- Use this instead if your framework uses inline script and style tags
+      <meta http-equiv="content-security-policy"
+         content="upgrade-insecure-requests; default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';" />
+      -->
+
+      <title>mm-interactive</title>
+      <meta name="description" content="Metamath proof tool">
+      <meta name="keywords" content="metamath">
+      <meta name="author" content="set.mm and mm-interactive contributors">
+      <!-- Less important
+         <meta name="theme-color" content="#fff">
+         <meta name="color-scheme" content="normal">
+         <link rel="icon" href="" />
+         <link rel="apple-touch-icon" href="" />
+         <link rel="manifest" href="" />
+      -->
+
+      <link rel="stylesheet" href="css/style.css">
+      <script defer type="module" src="js/main.js"></script>
+   </head>
+
+   <body>
+      <label>
+         Log
+         <textarea></textarea>
+      </label>
+   </body>
+
+</html>
