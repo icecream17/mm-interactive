@@ -1,5 +1,7 @@
-import { INFO, assert } from "./html.js"
-import { copySet, eqArr } from "./utils.js"
+import { INFO, assert, contextualize } from "./html.js";
+import { copySet, eqArr, setDiff, setUnion } from "./utils.js";
+
+// TODO: comments
 
 /** @type {Scope} */
 let currscope;
@@ -12,22 +14,24 @@ class Scope {
       /** @type {Map<string, Tok>} */
       this.tokRegistry = new Map()
       /** @type {Set<Ehyp>} */
-      this.ehyps = new Set()
-      /** @type {Set<Set<string>>} */
-      this.dvars = new Set()
+      this._ehyps = new Set()
+      /** @type {Set<Dvar>} */
+      this._dvars = new Set()
    }
 
-   hasTok(tok) {
-      return this.tokRegistry.has(tok) || this.parent?.hasTok(tok)
+   /** @return {boolean} */
+   hasTok(tokstr) {
+      return this.tokRegistry.has(tokstr) || this.parent?.hasTok(tokstr)
    }
 
-   getTok(tok) {
-      const r = this.tokRegistry.get(tok) ?? this.parent?.getTok(tok)
-      assert(r !== undefined, `getTok: ${tok} does not exist!`)
+   /** @return {Tpk} */
+   getTok(tokstr) {
+      const r = this.tokRegistry.get(tokstr) ?? this.parent?.getTok(tokstr)
+      assert(r !== undefined, `getTok: ${tokstr} does not exist!`)
       return r
    }
 
-   setTok(tok) {
+   addTok(tok) {
       this.tokRegistry.set(tok.name, tok)
    }
 
@@ -39,10 +43,15 @@ class Scope {
       return this.getTok(v).type === "v"
    }
 
+   /** @return {boolean} */
    hasEhyp(e) {
       return this.ehyps.has(e) || this.parent?.hasEhyp(e)
    }
 
+   /**
+    * Whether two variables are distinct
+    * @return {boolean}
+    */
    dVar(a, b) {
       for (const dvar of this.dvars) {
          if (dvar.has(a) && dvar.has(b)) {
@@ -51,14 +60,32 @@ class Scope {
       }
       return this.parent?.dVar(a, b) ?? false
    }
+
+   /** @return {typeof this._ehyps} */
+   get ehyps () {
+      if (this.parent == null) {
+         return copySet(this._ehyps)
+      } else {
+         return setUnion(this.parent.ehyps, this._ehyps)
+      }
+   }
+
+   /** @return {typeof this._dvars} */
+   get dvars () {
+      if (this.parent == null) {
+         return copySet(this._dvars)
+      } else {
+         return setUnion(this.parent.dvars, this._dvars)
+      }
+   }
 }
 
 const glscope = new Scope()
 /** @type {Map<Var, Fhyp>} */
 const fhyps = new Map() // Floating hypotheses are global
-/** @type {Map<str, Label>} */
+/** @type {Map<string, Label>} */
 const labels = new Map() // Hypotheses, assertions, and theorems
-/** @type {Set<str>} */
+/** @type {Set<string>} */
 const wasvar = new Set() // Only to prevent constants and previously defined variables to have conflicting names
 const declarationOrder = []
 const validSymbol = tok => /^[a-zA-Z0-9!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~]+$/.test(tok)
@@ -97,7 +124,7 @@ function Tok (type, name) {
    }
    this.type = type
    this.name = name
-   currscope.setTok(name, type)
+   currscope.addTok(this)
    declarationOrder.push(this)
 }
 
@@ -120,10 +147,17 @@ export const vDecl = (...names) => names.map(name => new Tok("v", name))
 
 // Metamath language - Distinct variable condition
 //   $d variable variable ...variable[] $.
+/**
+ * Although the specification doesn't have this check,
+ * no variables can be the same in a distinct variable condition.
+ * @param {string[]} vars - Actually a set of variable names
+ * @typedef {Set<string>} Dvar
+ */
 export function Dvar (...vars) {
+   /** @type {Dvar} */
    const vs = new Set(vars)
-   assert(vs.size === vars.length, `No duplicates! ${vars}`)
-   assert(vars.every(v => currscope.hasTok(v)))
+   assert(vs.size === vars.length, `No duplicate variables in a distinct variable condition! ${vars}`)
+   assert(vars.every(v => currscope.hasTok(v)), `Undeclared symbols! ${vars.filter(v => !currscope.hasTok(v))}`)
    currscope.dvars.add(vs)
    declarationOrder.push(vs)
 }
@@ -149,7 +183,7 @@ class Label {
       this.assertion = new Expr(str)
       this.vars = this.assertion.vars
       assert(currscope.isConst(this.assertion.toks[0]), `${type} ${name}; Labels must start with a typecode (constant):\n${str}`)
-      if (label !== "fhyp") {
+      if (type !== "fhyp") {
          const invalidvars = this.vars.filter(v => !fhyps.has(v))
          assert(invalidvars.length === 0, `${type} ${name}: Before using a variable it must appear in an fhyp\n${invalidvars}`)
       }
@@ -164,7 +198,7 @@ function labelPass (self) {
 
 // Metamath language - "floating" hypothesis
 //   label $f typecode variable $.
-class Fhyp extends Label {
+export class Fhyp extends Label {
    constructor (name, str) {
       super("fhyp", name, str)
       assert(this.assertion.toks.length === 2, `fhyp must have two tokens, got:\n${this.assertion.toks}`)
@@ -177,7 +211,7 @@ class Fhyp extends Label {
 
 // Metamath language - essential hypothesis
 //   label $e typecode ...math-symbol[] $.
-class Ehyp extends Label {
+export class Ehyp extends Label {
    constructor (name, str) {
       super("ehyp", name, str)
       currscope.ehyps.add(this)
@@ -190,6 +224,7 @@ class AssertedLabel extends Label {
       super(type, name, str)
 
       // Mandatory frame props
+      /** @type {Set<Ehyp>} */
       this.mandatoryHyps = new Set()
       this.mandatoryVars = new Set(this.vars)
       for (const ehyp of currscope.ehyps) {
@@ -199,10 +234,20 @@ class AssertedLabel extends Label {
          }
       }
 
+      /** @type {Set<Dvar>} */
+      this.mandatoryDvars = new Set()
+      for (const dvarc of currscope.dvars) {
+         for (const dvar of dvarc) {
+            if (this.mandatoryVars.has(currscope.getTok(dvar))) {
+               this.mandatoryDvars.add(dvarc)
+            }
+         }
+      }
+
+      // Check all vars are covered
       const coveredMandatoryVars = new Set()
-      for (const fhyp of fhyps.values()) {
-         const v = fhyp.vars[0]
-         if (this.mandatoryVars.includes(v)) {
+      for (const [v, fhyp] of fhyps) {
+         if (this.mandatoryVars.has(v)) {
             this.mandatoryHyps.add(fhyp)
             coveredMandatoryVars.add(v)
          }
@@ -225,23 +270,21 @@ class AssertedLabel extends Label {
          this.optionalHyps = new Set()
 
          // TODO: Optimization - don't recalc fhyp vars
-         for (const fhyp of fhyps) {
-            const v = fhyp.vars[0]
+         for (const [v, fhyp] of fhyps) {
             if (!this.mandatoryVars.has(v)) {
                this.optionalVars.add(v)
                this.optionalHyps.add(fhyp)
             }
          }
 
-         this.optionalDvars = new Set()
-
          // Distinct variable condition
-         for (const dvarc of dvars) {
-            for (const dvar of dvarc) {
-               if (!this.mandatoryVars.has(dvar)) {
-                  this.optionalVars.add(v)
-                  this.optionalDvars.add(dvarc)
-               }
+         this.optionalDvars = setDiff(currscope.dvars, this.mandatoryDvars)
+
+         /** @type {Map<str, Dvar>} */
+         this.associatedDvarPairs = new Map()
+         for (const dvar of currscope.dvars) {
+            for (const tok1 of dvar) {
+               this.associatedDvarPairs.set(tok1, dvar)
             }
          }
       }
@@ -249,20 +292,20 @@ class AssertedLabel extends Label {
 }
 
 // Metamath language - Axiomatic assertions
-class Alabe extends AssertedLabel {
+export class Alabe extends AssertedLabel {
    constructor (name, str) {
-      setupAssertedLabel("Axiom", name, str)
+      super("Axiom", name, str)
       labelPass(this)
    }
 }
 
 // Metamath language - Provable assertions
-class Plabe extends AssertedLabel {
+export class Plabe extends AssertedLabel {
    /**
     * @param {string[]} proof
     */
    constructor (name, str, proof) {
-      setupAssertedLabel("Theorem", name, str)
+      super("Theorem", name, str)
       this.proof = proof
       verifyProof(this)
       labelPass(this)
@@ -270,9 +313,14 @@ class Plabe extends AssertedLabel {
 }
 
 /**
- * @param {Plabe & ALabel} plabe
+ * @param {Plabe} plabe
  */
 function verifyProof(plabe) {
+   // Definitions:
+   //
+   // Substitution map: Maps variables to expressions
+   // Substitution: Replacement of variables with what they map to
+
    /** @type {Tok[][]} */
    const stack = []
 
@@ -293,7 +341,7 @@ function verifyProof(plabe) {
       /** @type {Label} */
       const ref = labels.get(label)
       if (ref.type === "ehyp") {
-         assert(currscope.hasEhyp(ref), `Label ${ref.name} in the proof of ${plabe.name} is not in scope!`)
+         assert(currscope.hasEhyp(ref), `Ehyp ${ref.name} in the proof of ${plabe.name} is not in scope!`)
       }
       return ref
    })
@@ -315,20 +363,20 @@ function verifyProof(plabe) {
          // As many stack entries as there are mandatory hypotheses are then
          // popped from the stack.
          const numMandatoryHyps = ref.mandatoryHyps.size
-         assert(stack.length >= numMandatoryHyps, `Theorem ${plabe.name}, step[${index}] ${ref.name} requires ${numMandatoryHyps} hypotheses but only ${stack.size} expressions on the proof stack`)
+         assert(stack.length >= numMandatoryHyps, `Theorem ${plabe.name}, step[${index}] ${ref.name} requires ${numMandatoryHyps} hypotheses but only ${stack.length} expressions on the proof stack`)
 
          const topmostEntries = stack.splice(stack.length - numMandatoryHyps, numMandatoryHyps)
 
-         // (Find substitution)
-         const sub = canUnify(topmostEntries, ref.mandatoryHyps)
-         assert(sub !== false, `Theorem ${plabe.name}, step[${index}] ${ref.name}'s hypothes(es) cannot be unified with the proof expression stack:\nHyps:\n${ref.mandatoryHyps}\n\nStack:\n${topmostEntries}`)
+         // (Find substitution map)
+         const submap = canUnify(topmostEntries, ref.mandatoryHyps)
+         assert(submap !== false, `Theorem ${plabe.name}, step[${index}] ${ref.name}'s hypothes(es) cannot be unified with the proof expression stack:\nHyps:\n${ref.mandatoryHyps}\n\nStack:\n${topmostEntries}`)
 
          // (Check distinct variable conditions)
-         dvCheck(sub, ref)
+         contextualize(dvCheck, `Theorem ${plabe.name}, step[${index}]`)(submap, ref, plabe)
 
          // The same substitution is then made to the referenced assertion,
          // and the result is pushed onto the stack.
-         stack.push(substitute(sub, ref.assertion))
+         stack.push(substitute(submap, ref.assertion))
       }
    }
 
@@ -339,17 +387,73 @@ function verifyProof(plabe) {
 }
 
 /**
+ * @param {Map<Tok, Tok[]>} submap - substitution map
+ * @param {AssertedLabel} ref
+ * @param {Plabe} plabe
+ */
+function dvCheck (submap, ref, plabe) {
+   const mandatoryDvars = ref.mandatoryDvars
+   for (const dvar of mandatoryDvars) {
+      // Set of subvars (maps to vname for debugging purposes)
+      const subvars = new Map()
+
+      // The $d statement is actually more general, as the "disjoint" in the
+      // name suggests. The full meaning is that if any substitution is made to
+      // two variables [...], the two expressions resulting from the
+      // substitution must have no variables in common.
+      // In addition, each possible pair of variables, one from each expression,
+      // must be in a $d statement associated with the statement being proved.
+
+      // Say u is a variable.
+      // If the restriction
+      //
+      //                       $d A B $.
+      //
+      // has been specified for a theorem referenced in a proof,
+      // we may not substitute A with A + u and B with B + u
+      // because these two symbol sequences have the variable u in common.
+      //
+      // Furthermore, if a and b are variables, we may not substitute A with a
+      // and B with b unless we have also specified $d a b for the theorem
+      // being proved; in other words, the $d property associated with a pair
+      // of variables must be effectively preserved after substitution.
+      for (const vname of dvar) {
+         const v = currscope.getTok(vname)
+         if (submap.has(v)) {
+            // [variables in the expression resulting from a substitution...
+            for (const subtok of submap.get(v)) {
+               if (currscope.isVar(subtok)) {
+                  // ...cannot be the same]
+                  assert(!subvars.has(subtok), `Invalid substitution! Cannot use the same variable ${subtok.name} in both $d ${vname} ${subvars.get(subtok)}`)
+                  subvars.set(subtok, vname)
+               }
+            }
+         }
+      }
+
+      // [$d must be preserved]
+      for (const comb1 of subvars.keys()) {
+         for (const comb2 of subvars.keys()) {
+            if (comb1 !== comb2) {
+               assert(plabe.associatedDvarPairs.get(comb1.name).has(comb2.name), `Invalid substitution! $d not preserved in $d ${subvars.get(comb1)} ${subvars.get(comb2)} because there is no $d ${comb1.name} ${comb2.name}`)
+            }
+         }
+      }
+   }
+}
+
+/**
  * Returns false or the required substitutions to make
- * @param {Expr[]} esa
- * @param {Expr[]} hyps
+ * @param {Tok[][]} esa
+ * @param {Set<Ehyp>} hyps
  */
 function canUnify(esa, hyps) {
-   if (esa.length !== esb.length) {
+   if (esa.length !== hyps.size) {
       return false
    }
 
    /** @type {[Tok[], Tok[]][]} */
-   const pairs = esa.map(((exa, i) => [exa.toks, hyps[i].toks]))
+   const pairs = [...hyps].map(((hyp, i) => [esa[i], hyp.assertion.toks]))
 
    // In order to solve unification for two groups of expressions,
    // let's first solve unification for two groups of one expression.
@@ -454,9 +558,9 @@ function _subpairs (hsubsts, pairs) {
 }
 
 /**
- * @param {Map<Tok, Tok[]>} substs
+ * @param {Map<Tok, Tok[]>} substs - substitution map
  * @param {Tok[]} expr
- * @returns {Tok[]}
+ * @return {Tok[]}
  */
 function substitute (substs, expr) {
    // if substs.has(tok), replace with ...substs.get(tok)

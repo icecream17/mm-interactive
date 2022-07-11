@@ -1,9 +1,7 @@
 
-/** @type {<A, B extends Callback>(defaul: A, method: B) => ((a: Parameters<A[B]>[0], b=defaul) => ReturnType<A[B]>);} */
+/** @type {<B extends PropertyKey, A extends Record<B, Callback>>(defaul: A, method: B) => ((a: Parameters<A[B]>[0], b?: A) => ReturnType<A[B]>)} */
 const fac2 = (defaul, method) => (a, b=defaul) => b[method](a)
-/** Append child to (default: document.body)
- * @type {typeof fac2<HTMLBodyElement, "appendChild">}
- */
+/** Append child to (default: document.body) */
 const aC2 = fac2(document.body, "appendChild")
 
 /** @type {typeof document.createElement} */
@@ -11,7 +9,7 @@ const makeEl = document.createElement.bind(document)
 
 /** @type {<A>(el: A, callback?: (...args: any) => any) => A} */
 const elC = (el, callback) => (callback?.(el), el)
-/** @type {<A>(el: A, ...children: Node[]) => A} */
+/** @type {<A extends HTMLElement>(el: A, ...children: Node[]) => A} */
 const elCh = (el, ...children) => (children.forEach(child => aC2(child, el)), el)
 
 /**
@@ -20,7 +18,7 @@ const elCh = (el, ...children) => (children.forEach(child => aC2(child, el)), el
 const makeElC = (tag, callback) => elC(makeEl(tag), callback)
 /**
  * children
- * @type {<K extends keyof HTMLElementTagNameMap>(tag: K, ....children: Node[]) => HTMLElementTagNameMap[K]} */
+ * @type {<K extends keyof HTMLElementTagNameMap>(tag: K, ...children: Node[]) => HTMLElementTagNameMap[K]} */
 const makeElCh = (tag, ...children) => elCh(makeEl(tag), ...children)
 /**
  * callback + children
@@ -28,7 +26,7 @@ const makeElCh = (tag, ...children) => elCh(makeEl(tag), ...children)
  * @param {Parameters<typeof makeElC>[1]} callback
  * @param {Parameters<typeof elCh> extends [any, ...infer B] ? B : []} children
  */
-const makeElCCh = (tag, callback, ...children) => elCh(makeElC(a, b), c)
+const makeElCCh = (tag, callback, ...children) => elCh(makeElC(tag, callback), ...children)
 
 const concat = (...args) => args.join("")
 const propFun = (prop, value) => obj => obj[prop] = value
@@ -65,8 +63,8 @@ export const [INFO, ERROR, assert, contextualize] = (() => {
          }
       },
       /** @type <F>(fn: F) => (...args: any) => ReturnType<F> */
-      fn => (...args) => {
-         context.push(fn.name)
+      (fn, ctxtxt=fn.name) => (...args) => {
+         context.push(ctxtxt)
          const result = fn(...args)
          context.pop()
          return result
