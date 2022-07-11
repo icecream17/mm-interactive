@@ -1,58 +1,63 @@
 
-/** @type {<B extends PropertyKey, A extends Record<B, Callback>>(defaul: A, method: B) => ((a: Parameters<A[B]>[0], b?: A) => ReturnType<A[B]>)} */
-const fac2 = (defaul, method) => (a, b=defaul) => b[method](a)
-/** Append child to (default: document.body) */
-const aC2 = fac2(document.body, "appendChild")
+// Children include strings coerced to text nodes, so useful
+
+/** @param {Node} parent */
+export const apCh2 = (child, parent = document.body) => (parent.appendChild(child), parent)
+/** @param {Element} parent */
+export const apCh1 = (parent, ...children) => (parent.append(...children), parent)
 
 /** @type {typeof document.createElement} */
-const makeEl = document.createElement.bind(document)
+export const makeEl = document.createElement.bind(document)
 
 /** @type {<A>(el: A, callback?: (...args: any) => any) => A} */
 const elC = (el, callback) => (callback?.(el), el)
-/** @type {<A extends HTMLElement>(el: A, ...children: Node[]) => A} */
-const elCh = (el, ...children) => (children.forEach(child => aC2(child, el)), el)
 
 /**
  * callback
  * @type {<K extends keyof HTMLElementTagNameMap>(tag: K, callback: (val: HTMLElementTagNameMap[K]) => any) => HTMLElementTagNameMap[K]} */
-const makeElC = (tag, callback) => elC(makeEl(tag), callback)
+export const makeElC = (tag, callback) => elC(makeEl(tag), callback)
 /**
  * children
  * @type {<K extends keyof HTMLElementTagNameMap>(tag: K, ...children: Node[]) => HTMLElementTagNameMap[K]} */
-const makeElCh = (tag, ...children) => elCh(makeEl(tag), ...children)
+export const makeElCh = (tag, ...children) => apCh1(makeEl(tag), ...children)
 /**
  * callback + children
  * @param {Parameters<typeof makeElC>[0]} tag
  * @param {Parameters<typeof makeElC>[1]} callback
  * @param {Parameters<typeof elCh> extends [any, ...infer B] ? B : []} children
  */
-const makeElCCh = (tag, callback, ...children) => elCh(makeElC(tag, callback), ...children)
+export const makeElCCh = (tag, callback, ...children) => elCh(makeElC(tag, callback), ...children)
 
-const concat = (...args) => args.join("")
-const propFun = (prop, value) => obj => obj[prop] = value
-const propFuns = map => obj => Object.assign(obj, map)
+export const propFun = (prop, value) => obj => obj[prop] = value
+export const propFuns = map => obj => Object.assign(obj, map)
 
-const makeButton = text =>
-   makeElC("button", propFun("textContext", text))
-
+export const make = makeElCh
 
 // kənsəsəˈrəʊlɪ //
 // aka user console
 export const [INFO, ERROR, assert, contextualize] = (() => {
    const context = []
-   const ucsoleTextarea = makeElC("textarea", propFun("id", "js-ucsolet"))
-   aC2(makeElCCh("label", propFun("textContent", "Log"), ucsoleTextarea))
+   const ucsoleTextarea = makeElC("textarea", propFuns({
+      className: "width100",
+      rows: 7,
+      onchange() {
+         ucsoleTextarea.scrollTop = ucsoleTextarea.scrollHeight
+      },
+   }))
+   apCh2(make("label", "Log\n", ucsoleTextarea))
 
    // Terrible contrast; a11y
    return [
       msg => {
          ucsoleTextarea.style.borderColor = "dodgerblue"
          ucsoleTextarea.value += "\n\n" + msg
+         ucsoleTextarea.scrollTop = ucsoleTextarea.scrollHeight
       },
       (msg, ...details) => {
          console.error(...details)
          ucsoleTextarea.style.borderColor = "red"
          ucsoleTextarea.value += `\n\nERROR\n${context.join('\n')}\n` + msg
+         ucsoleTextarea.scrollTop = ucsoleTextarea.scrollHeight
       },
       /** If the condition is falsy, show an error msg to the user and throws an error. */
       /** @type {(condition: unknown, msg: string, ...details: unknown[]) => asserts condition} */

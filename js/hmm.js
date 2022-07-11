@@ -78,6 +78,14 @@ class Scope {
          return setUnion(this.parent.dvars, this._dvars)
       }
    }
+
+   get depth () {
+      if (this.parent == null) {
+         return 0
+      } else {
+         return this.parent.depth + 1
+      }
+   }
 }
 
 const glscope = new Scope()
@@ -94,6 +102,7 @@ const validLabel = tok => /^[a-zA-Z0-9\-_.]+$/.test(tok) // Unrequired "\" escap
 // Metamath language - corresponds to "${"
 export function startScope () {
    const s = new Scope(currscope)
+   INFO(`depth ${s.depth}`)
    currscope = s
    return s
 }
@@ -101,6 +110,7 @@ export function startScope () {
 // Metamath language - corresponds to "$}"
 export function endScope () {
    assert(currscope !== glscope, "Cannot end global scope")
+   INFO(`depth ${currscope.parent.depth}`)
    return currscope = currscope.parent
 }
 
@@ -176,6 +186,7 @@ class Expr {
 
 class Label {
    constructor (type, name, str) {
+      assert(validLabel(name), `${name} is an invalid label! (only a-zA-Z0-9 and _.-)`)
       assert(!labels.has(name), `No duplicates! ${type} ${name}`)
       assert(!currscope.hasTok(name), `No duplicates! [Label-Math tok conflict] ${type} ${name}`)
       this.type = type
