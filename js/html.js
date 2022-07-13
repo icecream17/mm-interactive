@@ -46,18 +46,27 @@ export const [INFO, ERROR, assert, contextualize] = (() => {
    }))
    apCh2(make("label", "Log\n", ucsoleTextarea))
 
+   const _add = msg => {
+      if (ucsoleTextarea.value === "") {
+         ucsoleTextarea.value += msg
+      } else if (ucsoleTextarea.value.endsWith("\n")) {
+         ucsoleTextarea.value += "\n___\n" + msg
+      } else {
+         ucsoleTextarea.value += "\n\n___\n" + msg
+      }
+      ucsoleTextarea.scrollTop = ucsoleTextarea.scrollHeight
+   }
+
    // Terrible contrast; a11y
    return [
       msg => {
          ucsoleTextarea.style.borderColor = "dodgerblue"
-         ucsoleTextarea.value += "\n\n" + msg
-         ucsoleTextarea.scrollTop = ucsoleTextarea.scrollHeight
+         _add(msg)
       },
       (msg, ...details) => {
          console.error(...details)
          ucsoleTextarea.style.borderColor = "red"
-         ucsoleTextarea.value += `\n\nERROR\n${context.join('\n')}\n` + msg
-         ucsoleTextarea.scrollTop = ucsoleTextarea.scrollHeight
+         _add(`ERROR: ${msg}\n   at ${context.join('\n   at ')}`)
       },
       /** If the condition is falsy, show an error msg to the user and throws an error. */
       /** @type {(condition: unknown, msg: string, ...details: unknown[]) => asserts condition} */

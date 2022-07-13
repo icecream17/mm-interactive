@@ -1,5 +1,6 @@
-import { apCh1, apCh2, make } from "./html.js";
-import { startScope, endScope, cDecl, vDecl, Dvar, Fhyp, Ehyp, Alabe, Plabe } from "./hmm.js";
+import { apCh1, apCh2, INFO, make } from "./html.js";
+import { startScope, endScope, Dvar, Fhyp, Ehyp, Alabe, Plabe } from "./hmm.js";
+import { main, doAct, $c, $csetup, $v, $vsetup } from "./mainfns.js"
 
 /** @type {HTMLSelectElement} */
 const typdropdown = make("select",
@@ -20,19 +21,33 @@ const typdropdown = make("select",
 
 apCh2(make("label", "type ", typdropdown))
 
-const main = make("div")
-/** @type {HTMLButtonElement} */
-const doAct = make("button", "start scope")
-doAct.type = "button"
+document.body.addEventListener("keydown", ev => {
+    if (ev.altKey && ev.key === "/") {
+        typdropdown.focus()
+    } else if (ev.altKey && ev.key === "?") {
+        INFO(`
+            Keyboard shortcuts
+            Alt + /             Focus dropdown
+            Alt + Shift + /     Display this message
+        `)
+    }
+})
 
+// End fn declarations
+const noop = () => {}
 const fns = {
-    "${": ["start scope", startScope],
-    "$}": ["end scope", endScope],
+    "${": ["start scope", startScope, noop],
+    "$}": ["end scope", endScope, noop],
+    "$c": ["add constant(s)", $c, $csetup],
+    "$v": ["add variable(s)", $v, $vsetup],
 }
 
 typdropdown.onchange = () => {
-    doAct.name = fns[typdropdown.selectedOptions[0].text][0]
-    doAct.onclick = fns[typdropdown.selectedOptions[0].text][1]
+    const [name, onclick, setup] = fns[typdropdown.selectedOptions[0].text]
+    setup()
+    doAct.name = name
+    doAct.textContent = name
+    doAct.onclick = onclick
 }
 typdropdown.onchange()
 

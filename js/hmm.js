@@ -98,6 +98,7 @@ const wasvar = new Set() // Only to prevent constants and previously defined var
 const declarationOrder = []
 const validSymbol = tok => /^[a-zA-Z0-9!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~]+$/.test(tok)
 const validLabel = tok => /^[a-zA-Z0-9\-_.]+$/.test(tok) // Unrequired "\" escape for clarity
+const allCaps = str => /^[A-Z]+$/.test(str)
 
 // Metamath language - corresponds to "${"
 export function startScope () {
@@ -136,6 +137,7 @@ function Tok (type, name) {
    this.name = name
    currscope.addTok(this)
    declarationOrder.push(this)
+   INFO(`New $${type} tok: ${name}`)
 }
 
 function tokeq(toka, toke) {
@@ -313,13 +315,66 @@ export class Alabe extends AssertedLabel {
 // Metamath language - Provable assertions
 export class Plabe extends AssertedLabel {
    /**
-    * @param {string[]} proof
+    * @param {string[] | null} proof
     */
    constructor (name, str, proof) {
       super("Theorem", name, str)
-      this.proof = proof
-      verifyProof(this)
-      labelPass(this)
+      if (proof === null) {
+         this.proof = proof
+         verifyProof(this)
+         labelPass(this)
+      }
+   }
+
+   /**
+    * @param {string[]} labels
+    * @param {string} letters
+    */
+   static fromCompressed(name, str, parenlabels, letters) {
+      letters = [...letters].filter(letter => letter !== " " && letter !== "\n").join('')
+      assert(allCaps(letters), `this is a BUG: proof letters not in all caps!`)
+
+      // Alpha numbers are 1 indexed
+      const numbers = []
+      const tagged = [] // 1 indexing accounted for later
+      letters = [...letters]
+
+      // A-T is least significant base 20, U-Y is base 5, Z tags a proof step for later use
+      let base5 = ""
+      while (letters.length) {
+         const letter = letters.pop()
+         if ("ABCDEFGHIJKLMNOPQRST".includes(letter)) {
+            const n = parseInt(base5 || "0", 5) + "ABCDEFGHIJKLMNOPQRST".indexOf(letter) + 1
+
+            base5 = ""
+            numbers.push(n)
+            if (letters[0] === "Z") {
+               tagged.push(n)
+            }
+         } else if ("UVWXY".includes(letter)) {
+            base5 += "UVWXY".indexOf(letter) + 1
+         }
+      }
+
+      // setup
+      const plabe = new Plabe(name, str, null)
+      const mandatoryHyps = [...plabe.mandatoryHyps].map(hyp => hyp.name)
+      const nummap = [null, ...mandatoryHyps, ...parenlabels, ...tagged]
+
+      const prooflabels = []
+      const tagmap = {}
+      for (const num of numbers) {
+         const mapsto = nummap[num]
+         if (typeof mapsto === "string") {
+            prooflabels.push(mapsto)
+         } else { // number
+            prooflabels.push(...tagmap[num])
+         }
+
+         if (tagged.includes(num)) {
+            tagmap[num] = [...prooflabels]
+         }
+      }
    }
 }
 
